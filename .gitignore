@@ -1,0 +1,7 @@
+# Siamese - Omniglot
+siamese_omniglot/data/
+siamese_omniglot/tutorial/
+siamese_omniglot/wandb
+siamese_omniglot/test/ipynb
+
+wandb
