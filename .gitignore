@@ -3,5 +3,6 @@ siamese_omniglot/data/
 siamese_omniglot/tutorial/
 siamese_omniglot/wandb
 siamese_omniglot/test/ipynb
+siamese_omniglot/test.pt
 
 wandb
