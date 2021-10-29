@@ -7,8 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.datasets as datasets
-from torch.utils.data import DataLoader
-import torchvision
 from torchvision.transforms.transforms import ToTensor
 
 from models.model import My_siamese
@@ -18,6 +16,7 @@ from pathlib import Path
 from tqdm import tqdm
 import wandb
 
+import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -25,16 +24,39 @@ from dataset.reconstruct import prepare_data
 from dataset.loader import train_validation_loader
 from dataset.loader import testset_loader
 
+def torch_to_cv2(imgs):
 
-def imshow(img,text=None):
-    npimg = img.numpy()
-    plt.axis("off")
-    if text:
-        plt.text(75, 8, text, style='italic',fontweight='bold',
-            bbox={'facecolor':'white', 'alpha':0.8, 'pad':10})
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    for i, img in enumerate(imgs):
 
-    return plt 
+        img = img.cpu()
+        img = img.numpy().transpose(1,2,0)
+        img = (img -img.min())/(img.max()-img.min())*255
+
+        if i ==0:
+            cv_img = img
+        else : 
+            cv_img = np.concatenate((cv_img, img), axis=1)
+
+    return cv_img
+
+def put_result(img, pred, label, candi):
+
+    split = candi + 1
+
+    w = img.shape[1]//split
+
+    for i in range(split):
+        
+        if i ==0:
+            cv2.putText(img, "Template", (w//4, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, 0,2)
+        else : 
+            s = pred[i-1].item()
+            l = int(label[i-1].item())
+            cv2.putText(img, f"Result : {s:.2f}", (w//9 + w*i, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.4, 0,2)
+            cv2.putText(img, f"Label : {int(l)}", (w//4 + w*i, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.4, 0,2)
+
+    return img
+
 
 def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs, save_dir):
 
@@ -45,6 +67,7 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
         # Training
         model.train()
         train_loss = 0
+        train_acc = 0
 
         for i, (img1, img2, label) in tqdm(enumerate(train_loader), desc="[Epoch {}]".format(epoch), total=len(train_loader)):
 
@@ -57,14 +80,20 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
 
             train_loss += loss
 
-            if (i+1) % (len(train_loader)//5) == 0 or i == (len(train_loader) -1):
-                wandb.log({"Train_loss":train_loss/i})
+            # Accuracy
+            TP_mask = torch.logical_and(output>0, label.cuda()==1)
+            TN_mask = torch.logical_and(output<0, label.cuda()==0)
+            train_acc += (torch.sum(TP_mask) + torch.sum(TN_mask))/img1.shape[0]
         
         train_loss /= len(train_loader)
+        train_acc /= len(train_loader)
+        wandb.log({"Train_loss":train_loss, "Train_accuracy":train_acc})
 
         # Validation
         model.eval()
         val_loss = 0
+        val_acc = 0
+        val_imgs = []
 
         with torch.no_grad():         
             for i, (img1, img2, label) in tqdm(enumerate(val_loader), desc="[Epoch {}]".format(epoch), total=len(val_loader)):
@@ -74,16 +103,25 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
 
                 val_loss += loss
 
-                if (i+1) % (len(val_loader)//5) == 0 or i == (len(val_loader) -1):
-                    # concatenated = torch.cat((img1[0],img2[0]),-1)
-                    # distance = F.pairwise_distance(output1, output2)
+                # Accuracy
+                TP_mask = torch.logical_and(output>0, label.cuda()==1)
+                TN_mask = torch.logical_and(output<0, label.cuda()==0)
+                val_acc += (torch.sum(TP_mask) + torch.sum(TN_mask))/img1.shape[0]
+        
 
-                    # plt = imshow(torchvision.utils.make_grid(concatenated),'Dissimilarity: {:.2f}\nLabel : {}'.format(distance[0].item(),str(label[0])))
-                    
-                    # wandb.log({"Val_loss":val_loss/i, "Example":wandb.Image(plt)})
-                    wandb.log({"Val_loss":val_loss/i})
-            
+                if (i+1) % (len(val_loader)//5) == 0 or i == (len(val_loader) -1):
+
+                    pred_img = torch.cat((img1[0].unsqueeze(0),img2))
+
+                    pred_img_cv = torch_to_cv2(pred_img)
+                    result_img = put_result(pred_img_cv, output, label, img1.shape[0])
+
+                    val_imgs.append(wandb.Image(result_img))
+
             val_loss /= len(val_loader)
+            val_acc /= len(val_loader)
+            wandb.log({"Val_loss":val_loss, "Val_accuracy":val_acc, "Examples":val_imgs})
+            
 
         # Model save
         if best_loss == 0 or best_loss > val_loss:
@@ -150,7 +188,7 @@ def parse_opt():
     parser.add_argument('--name', default='siamese_omniglot_cnn', help='save to project/name')
     parser.add_argument('--workers', type=int, default=8, help='maximum number of dataloader workers')
     parser.add_argument('--augment', action='store_true', help='Data augmentation')
-    parser.add_argument('--candi', type=int, default=5)
+    parser.add_argument('--candi', type=int, default=8, help="batch size of val, test loader")
     parser.add_argument('--shuffle', action='store_false', help='training data shuffle')
     parser.add_argument('--seed', type=int, default=3, help='random seed integer')
 
