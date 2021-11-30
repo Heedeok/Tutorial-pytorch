@@ -84,10 +84,6 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
             TP_mask = torch.logical_and(output>0, label.cuda()==1)
             TN_mask = torch.logical_and(output<0, label.cuda()==0)
             train_acc += (torch.sum(TP_mask) + torch.sum(TN_mask))/img1.shape[0]
-        
-        train_loss /= len(train_loader)
-        train_acc /= len(train_loader)
-        wandb.log({"Train_loss":train_loss, "Train_accuracy":train_acc})
 
         # Validation
         model.eval()
@@ -109,7 +105,7 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
                 val_acc += (torch.sum(TP_mask) + torch.sum(TN_mask))/img1.shape[0]
         
 
-                if (i+1) % (len(val_loader)//5) == 0 or i == (len(val_loader) -1):
+                if (i+1) % (len(val_loader)//10) == 0 or i == (len(val_loader) -1):
 
                     pred_img = torch.cat((img1[0].unsqueeze(0),img2))
 
@@ -118,11 +114,14 @@ def run(model, loss_fn, optimizer, train_loader, val_loader, test_loader, epochs
 
                     val_imgs.append(wandb.Image(result_img))
 
-            val_loss /= len(val_loader)
-            val_acc /= len(val_loader)
-            wandb.log({"Val_loss":val_loss, "Val_accuracy":val_acc, "Examples":val_imgs})
             
-
+        train_loss /= len(train_loader)
+        train_acc /= len(train_loader)
+        val_loss /= len(val_loader)
+        val_acc /= len(val_loader)
+        wandb.log({"Train_loss":train_loss, "Train_accuracy":train_acc})
+        wandb.log({"Val_loss":val_loss, "Val_accuracy":val_acc, "Examples":val_imgs})
+            
         # Model save
         if best_loss == 0 or best_loss > val_loss:
             best_loss = val_loss
